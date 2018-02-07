@@ -1,0 +1,6 @@
+[package]
+name = "SoftwareEngineering"
+version = "0.1.0"
+authors = ["Orochimaru Nakamoto <brantleigh.bunting@gmail.com>"]
+
+[dependencies]
