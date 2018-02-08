@@ -1,10 +1,20 @@
 // #![feature(type_ascription)]
+#![allow(unused_variables)]
+/* Command Line Args Imports */
+use std::env;
+use std::process;
+
 /* File I/O Imports */
 use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use std::iter::Peekable;
+
+/* Set of acceptible language tokens */
+use std::collections::HashSet;
+use std::borrow::Borrow;
+use std::ops::Deref;
 
 /* Language Specification (modify to be BNF or EBNF format) 
  * ---Stack Manipulation---
@@ -53,7 +63,6 @@ use std::iter::Peekable;
  *
  */
 
-
 /* Parse Tree */
 struct Node <T> {
 	child: Vec<T>,
@@ -72,10 +81,12 @@ impl <T> Node <T> {
 
 
 
+
 #[derive(Debug, PartialEq)]
 pub enum Token {
 	Keyword(String), 		/* handles keywords, variables, and identifiers */
 	Whitespace(String),
+	Assignment(String),		/* := keyword */
 	Constant(i64), 			/* Use 64-bit for constant integers */
 	Equivalent,				/* <> operator */
 	LessThanEqual,			/* <= operator */
@@ -102,10 +113,20 @@ pub enum Expression {
 }
 
 
-
-
-fn lex <T> (input: &String) -> Result<Vec<Token>, String>
+fn lex(input: &String) -> Result<Vec<Token>, String>
 {
+
+	/* Populate HashSet with allowable keywords */
+
+	let grammar: HashSet<&str> = [
+		"push", "rvalue", "lvalue", "pop",
+		":=", "copy", "label", "goto", "gofalse",
+		"gotrue", "halt", "+", "-", "/", "div",
+		"&", "!", "|", "<>", "<=", ">=", "<", ">",
+		"=", "print", "show", "begin", "end",
+		"return", "call",
+	].iter().cloned().collect();
+
 	let mut result: Vec<Token> = Vec::new();
 
 	let mut iterator = input.chars().peekable();
@@ -113,12 +134,48 @@ fn lex <T> (input: &String) -> Result<Vec<Token>, String>
 
 	let FunctionDescriptorTree = Node::new("main");
 
+	let mut token_buf: Vec<String> = Vec::new();
+
 	/* If we can peek, we peek */
 	while let Some(&raw) = iterator.peek() {
 		match raw {
-			'0' ... '9' => {
-				/* Consume Character */
+			'a' ... 'z' => { /* Match a-z characters */
+	
+				while iterator.peek().unwrap().is_alphabetic() {
+					token_buf.push(iterator.next().unwrap().to_string());
+				}
+
+				let final_str = token_buf.join("");
+				
+				// println!("Parsed String: {}", final_str);
+				/* Empty out token buffer */
+
+
+				if grammar.contains(final_str.deref()) {
+					println!("Grammar Keyword Found: {:?}", final_str);
+					result.push(Token::Keyword(final_str));
+				}
+
+				
+
+				token_buf.clear();
+			}
+
+			' ' => {
 				iterator.next();
+			}
+
+			':' => {
+				let a = iterator.next().unwrap().to_string();
+				if *iterator.peek().unwrap() == '=' {
+					let b = iterator.next().unwrap().to_string();
+					result.push(Token::Assignment([a, b].join("")));
+				}
+			}
+
+
+			'0' ... '9' => { /* Match 0-9 characters */
+				iterator.next(); /* Consume Next Character */
 		
 				result.push(
 					Token::Constant(
@@ -128,11 +185,16 @@ fn lex <T> (input: &String) -> Result<Vec<Token>, String>
 
 			},
 			/* Handle all other cases, debug */
-			_ => return Err(format!("unexpected character {}", raw))
+			_ => {
+				iterator.next();
+				//return Err(format!("unexpected character {}", raw))
+			}
 		}
 	}
 	Ok(result)
 }
+
+
 
 fn handle_number<T: Iterator<Item = char>> (raw: char, iterator: &mut Peekable<T>) -> i64 
 {
@@ -148,14 +210,21 @@ fn handle_number<T: Iterator<Item = char>> (raw: char, iterator: &mut Peekable<T
 
 
 fn main() {
-    println!("Hello, world!");
 
-    read_in_file("src/demo.jaz");
 
+    let argv: Vec<String> = env::args().collect();
+    if argv.len() != 2 {
+        println!("\n\nError, exiting...\nUsage: {:?} src/demo.jaz", argv[0]);
+        process::exit(1);
+    }
+
+    let data: String = read_in_file(&argv[1]);
+    let a = Some(lex(&data));
+    println!("{:?}", a);
 }
 
 
-fn read_in_file(file_name: &str) {
+fn read_in_file(file_name: &str) -> String {
 	let path = Path::new(file_name);
 	let display = path.display();
 
@@ -171,5 +240,6 @@ fn read_in_file(file_name: &str) {
 		Err(why) => panic!("Couldn't read {}: {}", display, why.description()),
 		Ok(_) => print!("{} contains:\n{}", display, s),
 	}
+	s
 	/* file goes out of scope, and file_name gets closed */
 }
