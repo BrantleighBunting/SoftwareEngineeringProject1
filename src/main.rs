@@ -115,8 +115,17 @@ pub enum Expression {
 
 fn lex(input: &String) -> Result<Vec<Token>, String>
 {
+	/* This will let us collect tokens as part of 'show' statements */
+	let mut collect_printable_tokens: bool = false;
+	let mut printable: Vec<String> = Vec::new();
+
 
 	/* Populate HashSet with allowable keywords */
+
+
+
+	
+
 
 	let grammar: HashSet<&str> = [
 		"push", "rvalue", "lvalue", "pop",
@@ -138,14 +147,23 @@ fn lex(input: &String) -> Result<Vec<Token>, String>
 
 	/* If we can peek, we peek */
 	while let Some(&raw) = iterator.peek() {
+		print!("{:?} ", raw);
+		
+		// if collect_printable_tokens {
+		// 	printable.push(raw.to_string());
+		// }
 		match raw {
 			'a' ... 'z' => { /* Match a-z characters */
 	
 				while iterator.peek().unwrap().is_alphabetic() {
-					token_buf.push(iterator.next().unwrap().to_string());
+					let val = iterator.next().unwrap().to_string();
+					if collect_printable_tokens {
+						printable.push(val.to_string());
+					}
+					token_buf.push(val);
 				}
 
-				let final_str = token_buf.join("");
+				let final_str: String = token_buf.join("");
 				
 				// println!("Parsed String: {}", final_str);
 				/* Empty out token buffer */
@@ -153,16 +171,36 @@ fn lex(input: &String) -> Result<Vec<Token>, String>
 
 				if grammar.contains(final_str.deref()) {
 					println!("Grammar Keyword Found: {:?}", final_str);
-					result.push(Token::Keyword(final_str));
+					result.push(Token::Keyword(final_str.clone()));
+
+					match &*final_str { /* String -> &str for comparisons */
+						"show" => {
+							println!("Printable Statement Found...");
+							collect_printable_tokens = true;
+						},
+						_ => ()
+					}
 				}
 
 				
 
 				token_buf.clear();
 			}
+			'\n' => {
+				println!("New Line Hit...");
+				collect_printable_tokens = false;
+				println!("Printable Tokens Collected: {}", printable.join(""));
+				printable.clear();
+
+				iterator.next();
+			}
 
 			' ' => {
-				iterator.next();
+				let val = iterator.next().unwrap();
+				if collect_printable_tokens {
+					printable.push(val.to_string());
+				}
+		
 			}
 
 			':' => {
@@ -186,7 +224,11 @@ fn lex(input: &String) -> Result<Vec<Token>, String>
 			},
 			/* Handle all other cases, debug */
 			_ => {
-				iterator.next();
+				let val = iterator.next().unwrap();
+				if collect_printable_tokens {
+					printable.push(val.to_string());
+				}
+				
 				//return Err(format!("unexpected character {}", raw))
 			}
 		}
@@ -240,6 +282,7 @@ fn read_in_file(file_name: &str) -> String {
 		Err(why) => panic!("Couldn't read {}: {}", display, why.description()),
 		Ok(_) => print!("{} contains:\n{}", display, s),
 	}
+	
 	s
 	/* file goes out of scope, and file_name gets closed */
 }
