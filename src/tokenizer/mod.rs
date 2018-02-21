@@ -6,6 +6,11 @@ use std::ops::Deref;
 
 pub struct Tokenizer;
 
+
+
+
+
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
 	Keyword(String), 		/* handles keywords, variables, and identifiers */
@@ -43,8 +48,12 @@ impl Tokenizer {
 	{
 		/* This will let us collect tokens as part of 'show' statements */
 		let mut collect_printable_tokens: bool = false;
-		let mut printable: Vec<String> = Vec::new();
 
+		/* This lets us collect tokens as part of assignments */
+		let mut collect_assignment_tokens: bool = false;
+
+		let mut printable: Vec<String> = Vec::new();
+		let mut assignable: Vec<String> = Vec::new();
 
 		/* Populate HashSet with allowable keywords */
 
@@ -81,6 +90,9 @@ impl Tokenizer {
 						if collect_printable_tokens {
 							printable.push(val.to_string());
 						}
+						if collect_assignment_tokens {
+							assignable.push(val.to_string());
+						}
 						token_buf.push(val);
 					}
 
@@ -97,9 +109,16 @@ impl Tokenizer {
 
 						match &*final_str { /* String -> &str for comparisons */
 							"show" => {
-								println!("Printable Statement Found...");
 								collect_printable_tokens = true;
-							},
+							}
+							"print" => {
+								println!("Matched a print statement...");
+							}
+							"lvalue" | "rvalue" | "push" => {
+								println!("Matched an assignment...");
+								collect_assignment_tokens = true;
+
+							}
 							_ => ()
 						}
 					}
@@ -124,6 +143,18 @@ impl Tokenizer {
 
 						printable.clear();
 					}
+
+					if collect_assignment_tokens {
+						collect_assignment_tokens = false;
+
+						println!("Assignable Tokens Collected: {}", assignable.iter().map(|a| a.to_string()).collect::<String>());
+
+						let assign_val = assignable.iter().map(|a| a.to_string()).collect::<String>();
+
+						result.push(Token::Assignment(assign_val.clone()));
+
+						assignable.clear();
+					}
 					iterator.next();
 				}
 
@@ -131,6 +162,11 @@ impl Tokenizer {
 					let val = iterator.next().unwrap();
 					if collect_printable_tokens {
 						printable.push(val.to_string());
+					}
+					if collect_assignment_tokens {
+						if val != ' ' {
+							assignable.push(val.to_string());
+						}
 					}
 				}
 
