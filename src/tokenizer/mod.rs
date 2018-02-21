@@ -6,9 +6,11 @@ use std::ops::Deref;
 
 pub struct Tokenizer;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
 	Keyword(String), 		/* handles keywords, variables, and identifiers */
+	Printable(String), 		/* Contains the printable output to stdout */
+	Assigned(String),		/* Assigned value (right half of expression) */
 	Whitespace(String),
 	Assignment(String),		/* := keyword */
 	Constant(i64), 			/* Use 64-bit for constant integers */
@@ -27,14 +29,14 @@ pub enum Token {
 	RemainDiv(String),		/* div operator */
 }
 
-
-
 pub enum Expression {
 	Literal(Token),
 	Identifier(String),
 	Show(String), /* Can either be "" or "<some text here>" */
 	Assignment(),
 }
+
+
 
 impl Tokenizer {
 	pub fn lex(input: &String) -> Result<Vec<Token>, String>
@@ -90,6 +92,7 @@ impl Tokenizer {
 
 					if grammar.contains(final_str.deref()) {
 						println!("Grammar Keyword Found: {:?}", final_str);
+
 						result.push(Token::Keyword(final_str.clone()));
 
 						match &*final_str { /* String -> &str for comparisons */
@@ -104,10 +107,23 @@ impl Tokenizer {
 				}
 				'\n' => {
 					println!("New Line Hit...");
-					collect_printable_tokens = false;
-					println!("Printable Tokens Collected: {}", printable.join(""));
-					printable.clear();
 
+					if collect_printable_tokens {
+						collect_printable_tokens = false;
+
+						//let a = printable.clone_memory();
+
+						println!("Printable Tokens Collected: {}", printable.iter().map(|a| a.to_string()).collect::<String>());
+
+
+						//let s: String = String::from_iter(printable);
+
+						let print_line = printable.iter().map(|a| a.to_string()).collect::<String>();
+
+						result.push(Token::Printable(print_line.clone()));
+
+						printable.clear();
+					}
 					iterator.next();
 				}
 
@@ -125,8 +141,6 @@ impl Tokenizer {
 						result.push(Token::Assignment([a, b].join("")));
 					}
 				}
-
-
 				'0' ... '9' => { /* Match 0-9 characters */
 					iterator.next(); /* Consume Next Character */
 

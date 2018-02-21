@@ -1,4 +1,7 @@
 #![allow(unused_variables)]
+#![allow(non_snake_case)]
+#![allow(unreachable_patterns)]
+#![feature(match_default_bindings)]
 #![allow(dead_code)]
 
 /* Command Line Args Imports */
@@ -8,10 +11,12 @@ use std::process;
 /* Module Imports */
 mod tokenizer;
 mod fileio;
+mod parsetree;
 
 /* Module Utilization */
-use tokenizer::Tokenizer;
+use tokenizer::{Tokenizer, Token};
 use fileio::FileIO;
+use parsetree::Node;
 
 
 /* Language Specification (modify to be BNF or EBNF format) 
@@ -62,19 +67,92 @@ use fileio::FileIO;
  */
 
 
-/* Parse Tree */
-struct Node <T> {
-	child: Vec<T>,
-	entry: T
-}
 
-impl <T> Node <T> {
-	fn new(entry: T) -> Node <T> {
-		return Node {
-			child: Vec::new(),
-			entry: entry
+/* We want to return an array of c++ lines to write to file */
+/* TODO: Build a method to write to file a Vec<String> */
+fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
+
+	let output_lines: Vec<String> = Vec::new();
+
+	for item in raw_tokens {
+		match &item {
+			
+			Token::Printable(ref c) => {
+
+				/* Printable is defined in Token as Printable(String),
+				 * so we reference the string as "ref c"
+				 */
+
+				println!("Matched Printable, raw val: {:?}", c);
+
+				println!("Equivalent Statement in c++: ");
+				println!("cout << {:?} << endl", c);
+			}
+			Token::Keyword(ref c) => {
+				println!("Matched Keyword, raw val: {:?}", c);
+			}
+
+			Token::Assigned(ref c) => {
+				println!("Matched Assigned, raw val: {:?}", c);
+			}
+			Token::Whitespace(ref c) => {
+				println!("Matched Whitespace, raw val: {:?}", c);
+			}
+			Token::Assignment(ref c) => {
+				println!("Matched Assignment, raw val: {:?}", c);
+			}
+			Token::Constant(ref c) => {
+				println!("Matched Constant, raw val: {:?}", c);
+			} 		
+			&Token::Equivalent => {
+
+			}			
+			&Token::LessThanEqual => {
+
+			}		
+			&Token::GreaterThanEqual => {
+
+			}	
+			&Token::LessThan => {
+
+			} 			
+			&Token::GreaterThan => {
+
+			}		
+			&Token::Equal => {
+
+			}				
+			&Token::And => {
+
+			}				
+			&Token::Or => {
+
+			}					
+			&Token::Not => {
+				
+			}				
+			&Token::Plus => {
+				
+			}				
+			&Token::Minus => {
+				
+			}				
+			&Token::IntDiv => {
+				
+			}				
+			RemainDiv => {
+				
+			}
+
+
+			_ => {
+				println!("Unreachable Hit.");
+				unreachable!()
+			}
 		}
 	}
+
+	return output_lines
 }
 
 
@@ -88,8 +166,14 @@ fn main() {
     }
 
     let data: String = FileIO::read_in_file(&argv[1]);
-    let a = Some(Tokenizer::lex(&data));
-    println!("{:?}", a);
+
+    let result: Vec<Token> = Tokenizer::lex(&data).unwrap();
+
+    println!("{:?}\n\n", result);
+
+    filter_to_cpp(result.clone());
+
+   
 }
 
 
