@@ -74,9 +74,13 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 
 	let output_lines: Vec<String> = Vec::new();
 
-	for item in raw_tokens {
-		match &item {
-			
+	let tokens = raw_tokens.clone();
+
+	let mut iterable = tokens.iter().peekable();
+
+
+	while let Some(&raw) = iterable.peek() {
+		match raw {
 			Token::Printable(ref c) => {
 
 				/* Printable is defined in Token as Printable(String),
@@ -87,68 +91,92 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 
 				println!("Equivalent Statement in c++: ");
 				println!("cout << {:?} << endl", c);
+
+				iterable.next();
 			}
 			Token::Keyword(ref c) => {
 				println!("Matched Keyword, raw val: {:?}", c);
+
+				/* Consume */
+				iterable.next();
+
+				if let Token::Assignment(variable) = iterable.peek().unwrap() {
+					iterable.next();
+
+					if let Token::Keyword(keywd) = iterable.peek().unwrap() {
+						if keywd == "push" {
+							iterable.next();
+							if let Token::Constant(int) = iterable.peek().unwrap() {
+								iterable.next();
+								println!("uint64_t {} = {};", variable, int);
+							}
+						}
+					}
+				}
 			}
 
 			Token::Assigned(ref c) => {
 				println!("Matched Assigned, raw val: {:?}", c);
+
+				iterable.next();
 			}
 			Token::Whitespace(ref c) => {
 				println!("Matched Whitespace, raw val: {:?}", c);
+
+				iterable.next();
 			}
 			Token::Assignment(ref c) => {
 				println!("Matched Assignment, raw val: {:?}", c);
+
+				iterable.next();
 			}
 			Token::Constant(ref c) => {
 				println!("Matched Constant, raw val: {:?}", c);
+
+				iterable.next();
 			} 		
 			&Token::Equivalent => {
 
+				iterable.next();
 			}			
 			&Token::LessThanEqual => {
-
+				iterable.next();
 			}		
 			&Token::GreaterThanEqual => {
-
+				iterable.next();
 			}	
 			&Token::LessThan => {
-
+				iterable.next();
 			} 			
 			&Token::GreaterThan => {
-
+				iterable.next();
 			}		
 			&Token::Equal => {
-
+				iterable.next();
 			}				
 			&Token::And => {
-
+				iterable.next();
 			}				
 			&Token::Or => {
-
+				iterable.next();
 			}					
 			&Token::Not => {
-				
+				iterable.next();
 			}				
 			&Token::Plus => {
-				
+				iterable.next();
 			}				
 			&Token::Minus => {
-				
+				iterable.next();
 			}				
 			&Token::IntDiv => {
-				
+				iterable.next();
 			}				
 			RemainDiv => {
-				
+				iterable.next();
 			}
 
-
-			_ => {
-				println!("Unreachable Hit.");
-				unreachable!()
-			}
+			_ => { unreachable!() }
 		}
 	}
 

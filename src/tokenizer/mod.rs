@@ -7,16 +7,16 @@ use std::ops::Deref;
 pub struct Tokenizer;
 
 
-
-
-
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
 	Keyword(String), 		/* handles keywords, variables, and identifiers */
 	Printable(String), 		/* Contains the printable output to stdout */
 	Assigned(String),		/* Assigned value (right half of expression) */
 	Whitespace(String),
+
+	FunctionCall(String),   /* Represents a function call */
+
+
 	Assignment(String),		/* := keyword */
 	Constant(i64), 			/* Use 64-bit for constant integers */
 	Equivalent,				/* <> operator */
@@ -41,19 +41,52 @@ pub enum Expression {
 	Assignment(),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Recognize {
+	token: Option<Token>,
+	to_match: bool,
+	collection: Vec<String>,
+}
+
 
 
 impl Tokenizer {
+
+	pub fn reduce_tokens_to_enum(raw: &mut Recognize, result: &mut Vec<Token>) {
+		if raw.to_match {
+			raw.to_match = false;
+
+			println!("Tokens Collected: {}", raw.collection.iter().map(|a| a.to_string()).collect::<String>());
+
+			let a = raw.collection.iter().map(|a| a.to_string()).collect::<String>();
+			let token = raw.token.clone();
+
+			if a != "" {
+				match token.unwrap() {
+					Token::Printable(ref c) => {
+						result.push(Token::Printable(a.clone()));
+					}
+					Token::FunctionCall(ref c) => {
+						result.push(Token::FunctionCall(a.clone()));
+					}
+					Token::Assignment(ref c) => {
+						result.push(Token::Assignment(a.clone()));
+					}
+					_ => {/* Sink */}
+				}
+			}
+			raw.collection.clear()					
+		}
+	}
+
 	pub fn lex(input: &String) -> Result<Vec<Token>, String>
 	{
-		/* This will let us collect tokens as part of 'show' statements */
-		let mut collect_printable_tokens: bool = false;
-
-		/* This lets us collect tokens as part of assignments */
-		let mut collect_assignment_tokens: bool = false;
-
-		let mut printable: Vec<String> = Vec::new();
-		let mut assignable: Vec<String> = Vec::new();
+		/* This allows us to recognize any token, and collect its subsequent values */
+		let mut recognizer = Recognize { 
+			token: None, 
+			to_match: false,
+			collection: Vec::new()
+		};
 
 		/* Populate HashSet with allowable keywords */
 
@@ -87,12 +120,11 @@ impl Tokenizer {
 
 					while iterator.peek().unwrap().is_alphabetic() {
 						let val = iterator.next().unwrap().to_string();
-						if collect_printable_tokens {
-							printable.push(val.to_string());
+
+						if recognizer.to_match {
+							recognizer.collection.push(val.to_string());
 						}
-						if collect_assignment_tokens {
-							assignable.push(val.to_string());
-						}
+
 						token_buf.push(val);
 					}
 
@@ -109,64 +141,70 @@ impl Tokenizer {
 
 						match &*final_str { /* String -> &str for comparisons */
 							"show" => {
-								collect_printable_tokens = true;
+								recognizer = Recognize {
+									token: Some(Token::Printable(String::new())),
+									to_match: true,
+									collection: Vec::new()
+								}
+
 							}
 							"print" => {
 								println!("Matched a print statement...");
 							}
 							"lvalue" | "rvalue" | "push" => {
 								println!("Matched an assignment...");
-								collect_assignment_tokens = true;
+								recognizer = Recognize {
+									token: Some(Token::Assignment(String::new())),
+									to_match: true,
+									collection: Vec::new()
+								}
 
+							}
+
+							"goto" => {
+								println!("Matched a function call...");
+								recognizer = Recognize {
+									token: Some(Token::FunctionCall(String::new())),
+									to_match: true,
+									collection: Vec::new()
+								}
 							}
 							_ => ()
 						}
 					}
 					token_buf.clear();
 				}
+
 				'\n' => {
 					println!("New Line Hit...");
 
-					if collect_printable_tokens {
-						collect_printable_tokens = false;
+					Tokenizer::reduce_tokens_to_enum(&mut recognizer, &mut result);
 
-						//let a = printable.clone_memory();
-
-						println!("Printable Tokens Collected: {}", printable.iter().map(|a| a.to_string()).collect::<String>());
-
-
-						//let s: String = String::from_iter(printable);
-
-						let print_line = printable.iter().map(|a| a.to_string()).collect::<String>();
-
-						result.push(Token::Printable(print_line.clone()));
-
-						printable.clear();
-					}
-
-					if collect_assignment_tokens {
-						collect_assignment_tokens = false;
-
-						println!("Assignable Tokens Collected: {}", assignable.iter().map(|a| a.to_string()).collect::<String>());
-
-						let assign_val = assignable.iter().map(|a| a.to_string()).collect::<String>();
-
-						result.push(Token::Assignment(assign_val.clone()));
-
-						assignable.clear();
-					}
 					iterator.next();
 				}
 
 				' ' => {
 					let val = iterator.next().unwrap();
-					if collect_printable_tokens {
-						printable.push(val.to_string());
-					}
-					if collect_assignment_tokens {
-						if val != ' ' {
-							assignable.push(val.to_string());
+
+					match recognizer.token {
+						Some(Token::Printable(ref c)) => {
+							recognizer.collection.push(val.to_string());
 						}
+						Some(Token::Assignment(ref c)) => {
+							if val != ' ' {
+								recognizer.collection.push(val.to_string());
+							}
+						}
+						Some(Token::FunctionCall(ref c)) => {
+							if val != ' ' {
+								recognizer.collection.push(val.to_string());
+							}
+						}
+						None => {
+
+						}
+
+						_ => {}
 					}
 				}
 
@@ -189,11 +227,13 @@ impl Tokenizer {
 				/* Handle all other cases, debug */
 				_ => {
 					let val = iterator.next().unwrap();
-					if collect_printable_tokens {
-						printable.push(val.to_string());
-					}
 
-					//return Err(format!("unexpected character {}", raw))
+					match recognizer.token {
+						Some(Token::Printable(ref c)) => {
+							recognizer.collection.push(val.to_string());
+						}
+						_ => {}
+					}
 				}
 			}
 		}
