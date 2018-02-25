@@ -17,6 +17,8 @@ mod parsetree;
 use tokenizer::{Tokenizer, Token};
 use fileio::FileIO;
 use parsetree::Node;
+use std::collections::HashMap;
+use std::ops::Deref;
 
 
 /* Language Specification (modify to be BNF or EBNF format) 
@@ -68,6 +70,29 @@ use parsetree::Node;
 
 
 
+fn build_parse_tree(raw_tokens: &Vec<Token>) -> Option<Node<Token>> {
+
+	let tokens = raw_tokens.clone();
+
+	let root: Node<&Token> = Node::new(tokens.first().unwrap());
+
+	let mut iterable = tokens.iter().peekable();
+
+	while let Some(&raw) = iterable.peek() {
+
+	}
+
+
+	for item in tokens.clone() {
+		/* Build the parse tree by recursively looping through the tree */
+
+	}
+
+
+	return None;
+}
+
+
 /* We want to return an array of c++ lines to write to file */
 /* TODO: Build a method to write to file a Vec<String> */
 fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
@@ -77,6 +102,10 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 	let tokens = raw_tokens.clone();
 
 	let mut iterable = tokens.iter().peekable();
+
+	/* Stores our variable assignments, used with rvalue and print in jaz */
+	let mut variables: HashMap<String, i64> = HashMap::new();
+	
 
 
 	while let Some(&raw) = iterable.peek() {
@@ -100,6 +129,17 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 				/* Consume */
 				iterable.next();
 
+				if c == "rvalue" {
+					iterable.next();
+					if let Token::Keyword(ref a) = iterable.peek().unwrap() {
+						if a == "print" {
+							iterable.next();
+
+							println!("Printable rvalue...");
+						}
+					}
+				}
+
 				if let Token::Assignment(variable) = iterable.peek().unwrap() {
 					iterable.next();
 
@@ -109,6 +149,7 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 							if let Token::Constant(int) = iterable.peek().unwrap() {
 								iterable.next();
 								println!("uint64_t {} = {};", variable, int);
+								variables.insert(variable.clone(), *int);
 							}
 						}
 					}

@@ -16,7 +16,6 @@ pub enum Token {
 
 	FunctionCall(String),   /* Represents a function call */
 
-
 	Assignment(String),		/* := keyword */
 	Constant(i64), 			/* Use 64-bit for constant integers */
 	Equivalent,				/* <> operator */
@@ -56,7 +55,7 @@ impl Tokenizer {
 		if raw.to_match {
 			raw.to_match = false;
 
-			println!("Tokens Collected: {}", raw.collection.iter().map(|a| a.to_string()).collect::<String>());
+			//println!("Tokens Collected: {}", raw.collection.iter().map(|a| a.to_string()).collect::<String>());
 
 			let a = raw.collection.iter().map(|a| a.to_string()).collect::<String>();
 			let token = raw.token.clone();
@@ -135,7 +134,7 @@ impl Tokenizer {
 
 
 					if grammar.contains(final_str.deref()) {
-						println!("Grammar Keyword Found: {:?}", final_str);
+						//println!("Grammar Keyword Found: {:?}", final_str);
 
 						result.push(Token::Keyword(final_str.clone()));
 
@@ -149,7 +148,7 @@ impl Tokenizer {
 
 							}
 							"print" => {
-								println!("Matched a print statement...");
+								//println!("Matched a print statement...");
 							}
 							"lvalue" | "rvalue" | "push" => {
 								println!("Matched an assignment...");
@@ -200,10 +199,7 @@ impl Tokenizer {
 								recognizer.collection.push(val.to_string());
 							}
 						}
-						None => {
-
-						}
-
+						None => { println!("Recognizer wasnt initialized properly."); }
 						_ => {}
 					}
 				}
@@ -218,11 +214,14 @@ impl Tokenizer {
 				'0' ... '9' => { /* Match 0-9 characters */
 					iterator.next(); /* Consume Next Character */
 
-					result.push(
-						Token::Constant(
-							Tokenizer::handle_number(raw, &mut iterator)
-						)
-					);
+					let mut num = raw.to_string().parse::<i64>().expect("");
+
+					while let Ok(digit) = iterator.peek().map(|c| c.to_string().parse::<i64>()).unwrap() {
+						num = num * 10 + digit;
+						iterator.next();
+					}
+
+					result.push(Token::Constant(num));
 				},
 				/* Handle all other cases, debug */
 				_ => {
@@ -239,17 +238,4 @@ impl Tokenizer {
 		}
 		Ok(result)
 	}
-
-
-	pub fn handle_number<T: Iterator<Item = char>> (raw: char, iterator: &mut Peekable<T>) -> i64
-	{
-		let mut num = raw.to_string().parse::<i64>().expect("Should have been a digit");
-
-		while let Some(Ok(digit)) = iterator.peek().map(|c| c.to_string().parse::<i64>()) {
-			num = num * 10 + digit; /* Apply binary operations here to make more efficient */
-			iterator.next();
-		}
-		num
-	}
-
 }
