@@ -119,7 +119,7 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 				println!("Matched Printable, raw val: {:?}", c);
 
 				println!("Equivalent Statement in c++: ");
-				println!("cout << {:?} << endl", c);
+				println!("\ncout << {:?} << endl;\n", c);
 
 				iterable.next();
 			}
@@ -148,7 +148,7 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 							iterable.next();
 							if let Token::Constant(int) = iterable.peek().unwrap() {
 								iterable.next();
-								println!("uint64_t {} = {};", variable, int);
+								println!("\nuint64_t {} = {};\n", variable, int);
 								variables.insert(variable.clone(), *int);
 							}
 						}
