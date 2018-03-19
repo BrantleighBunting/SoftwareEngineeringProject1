@@ -15,6 +15,9 @@ pub enum Token {
 	Whitespace(String),
 
 	FunctionCall(String),   /* Represents a function call */
+	FunctionCallWithParams(String), /* function call w params */
+	FunctionName(String),	/* Represents a function name */
+	NewLine,				/* New line for parsing purposes */
 
 	Assignment(String),		/* := keyword */
 	Constant(i64), 			/* Use 64-bit for constant integers */
@@ -68,6 +71,12 @@ impl Tokenizer {
 					Token::FunctionCall(ref c) => {
 						result.push(Token::FunctionCall(a.clone()));
 					}
+					Token::FunctionCallWithParams(ref c) => {
+						result.push(Token::FunctionCallWithParams(a.clone()));
+					}
+					Token::FunctionName(ref c) => {
+						result.push(Token::FunctionName(a.clone()));
+					}
 					Token::Assignment(ref c) => {
 						result.push(Token::Assignment(a.clone()));
 					}
@@ -75,6 +84,86 @@ impl Tokenizer {
 				}
 			}
 			raw.collection.clear()					
+		}
+	}
+
+	
+
+	fn build_recognizer(
+		final_str: &str, 
+		old_token: Option<Token>, 
+		can_update_recognizer: &mut bool
+	) -> Recognize {
+
+		let token = match final_str { 
+			"show" => {
+				Some(Token::Printable(String::new()))
+			}
+			"lvalue" => {
+				println!("Matched an assignment...");
+				Some(Token::Assignment(String::new()))
+			}
+			"rvalue" => {
+				println!("Matched an assignment...");
+				Some(Token::Assignment(String::new()))
+			}
+			"push" => {
+				println!("Matched an assignment...");
+				Some(Token::Assignment(String::new()))
+			}
+			"label" => {
+				println!("Matched a function name...");
+				Some(Token::FunctionName(String::new()))
+			}
+			"call" => {
+				println!("Matched a function call with params...");
+				Some(Token::FunctionCallWithParams(String::new()))
+			}
+			"goto" => {
+				println!("Matched a function call...");
+				Some(Token::FunctionCall(String::new()))
+			}
+			_ => None,
+		};
+
+
+		match token.clone() {
+			Some(new) => {
+
+				// match old_token.clone() {
+				// 	Some(old) => {
+				// 		if let Token::Printable(pval) = old {
+				// 			if let Token::FunctionCallWithParams(cval) = new {
+				// 				if *can_update_recognizer {
+				// 					*can_update_recognizer = false;
+				// 					return Recognize { 
+				// 						token: old_token, 
+				// 						to_match: true,
+				// 						collection: Vec::new()
+				// 					};
+				// 				}
+				// 				/* Early return, handle the 'call' in a printed string */
+								
+				// 			}
+				// 		}
+				// 	}
+				// 	None => {}
+				// }
+
+
+				return Recognize { 
+					token: token, 
+					to_match: true,
+					collection: Vec::new()
+				};
+			}
+			None => {
+				return Recognize {
+					token: None,
+					to_match: false,
+					collection: Vec::new()
+				}
+			}
 		}
 	}
 
@@ -108,12 +197,11 @@ impl Tokenizer {
 		let mut token_buf: Vec<String> = Vec::new();
 
 		/* If we can peek, we peek */
+		let mut is_printable: bool = false;
 		while let Some(&raw) = iterator.peek() {
 			print!("{:?} ", raw);
-
-			// if collect_printable_tokens {
-			// 	printable.push(raw.to_string());
-			// }
+			
+			
 			match raw {
 				'a' ... 'z' => { /* Match a-z characters */
 
@@ -128,54 +216,42 @@ impl Tokenizer {
 					}
 
 					let final_str: String = token_buf.join("");
-
-					// println!("Parsed String: {}", final_str);
+					println!("Final String: {}", final_str);
 					/* Empty out token buffer */
+					
+					if !is_printable {
+						if grammar.contains(final_str.deref()) {
+							
+							result.push(Token::Keyword(final_str.clone()));
+
+							let old_token = recognizer.token;
+							recognizer = Tokenizer::build_recognizer(
+								&*final_str,
+								old_token.clone(),
+								&mut true
+							);
 
 
-					if grammar.contains(final_str.deref()) {
-						//println!("Grammar Keyword Found: {:?}", final_str);
+							println!("Old Token: {:?}", old_token);
+							println!("New Token: {:?}", recognizer.token);
 
-						result.push(Token::Keyword(final_str.clone()));
-
-						match &*final_str { /* String -> &str for comparisons */
-							"show" => {
-								recognizer = Recognize {
-									token: Some(Token::Printable(String::new())),
-									to_match: true,
-									collection: Vec::new()
-								}
-
+							if let Some(Token::Printable(a)) = recognizer.token.clone() {
+								is_printable = true;
 							}
-							"print" => {
-								//println!("Matched a print statement...");
-							}
-							"lvalue" | "rvalue" | "push" => {
-								println!("Matched an assignment...");
-								recognizer = Recognize {
-									token: Some(Token::Assignment(String::new())),
-									to_match: true,
-									collection: Vec::new()
-								}
-
-							}
-
-							"goto" => {
-								println!("Matched a function call...");
-								recognizer = Recognize {
-									token: Some(Token::FunctionCall(String::new())),
-									to_match: true,
-									collection: Vec::new()
-								}
-							}
-							_ => ()
+							// if !can_update_recognizer {
+							// 	recognizer.token = old_token;
+							// }
+							
 						}
 					}
 					token_buf.clear();
 				}
 
 				'\n' => {
+					is_printable = false;
 					println!("New Line Hit...");
+					
+					//result.push(Token::NewLine);
 
 					Tokenizer::reduce_tokens_to_enum(&mut recognizer, &mut result);
 
@@ -183,22 +259,38 @@ impl Tokenizer {
 				}
 
 				' ' => {
+					
 					let val = iterator.next().unwrap();
-
+					
 					match recognizer.token {
 						Some(Token::Printable(ref c)) => {
-							recognizer.collection.push(val.to_string());
+							
+							recognizer.collection.push(val.to_string());						
 						}
 						Some(Token::Assignment(ref c)) => {
+					
 							if val != ' ' {
 								recognizer.collection.push(val.to_string());
 							}
 						}
 						Some(Token::FunctionCall(ref c)) => {
+						
 							if val != ' ' {
 								recognizer.collection.push(val.to_string());
 							}
 						}
+						Some(Token::FunctionCallWithParams(ref c)) => {
+							if val != ' ' {
+								recognizer.collection.push(val.to_string());
+							}					
+						}
+						Some(Token::FunctionName(ref c)) => {
+			
+							if val != ' ' { /* Can further validate syntax here */
+								recognizer.collection.push(val.to_string());
+							}
+						}
+						
 						None => { println!("Recognizer wasnt initialized properly."); }
 						_ => {}
 					}
@@ -212,6 +304,7 @@ impl Tokenizer {
 					}
 				}
 				'0' ... '9' => { /* Match 0-9 characters */
+
 					iterator.next(); /* Consume Next Character */
 
 					let mut num = raw.to_string().parse::<i64>().expect("");
@@ -225,10 +318,12 @@ impl Tokenizer {
 				},
 				/* Handle all other cases, debug */
 				_ => {
+
 					let val = iterator.next().unwrap();
 
 					match recognizer.token {
 						Some(Token::Printable(ref c)) => {
+							// can_update_recognizer = false;
 							recognizer.collection.push(val.to_string());
 						}
 						_ => {}
