@@ -99,7 +99,9 @@ fn build_parse_tree(raw_tokens: &Vec<Token>) -> Option<Node<Token>> {
 #[derive(Debug)]
 struct Call {
 	name: String,
+	passed_params: Vec<String>,
 	params: HashMap<String, String>,
+	local_vars: HashMap<String, String>,
 	body: Vec<String>
 }
 
@@ -113,7 +115,7 @@ struct Function {
 
 /* We want to return an array of c++ lines to write to file */
 /* TODO: Build a method to write to file a Vec<String> */
-fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
+fn filter_to_cpp(raw_tokens: Vec<Token>) -> (Vec<String>, HashMap<String, i64>) {
 
 	let mut output_lines: Vec<String> = Vec::new();
 
@@ -123,34 +125,84 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 
 	/* Stores our variable assignments, used with rvalue and print in jaz */
 	let mut variables: HashMap<String, i64> = HashMap::new();
-	
-
-
-
-
-	/* First Pass, Generate Functions and Call code, Tokens -> Blocks */
-	// println!("First Pass, Trying to reduce into discrete blocks...");
-	// while let Some(&raw) = iterable.peek() {
-	// 	match raw {
-
-	// 	}
-	// }
+	/* To update values in this use: *my_map.get_mut("a").unwrap() += 10; */
 
 	let mut call = Call { 
 		name: String::new(),
+		passed_params: Vec::new(),
 		params: HashMap::new(),
+		local_vars: HashMap::new(),
 		body: Vec::new()
 	};
 
-	// let mut function = Function {
-	// 	params: HashMap::new(),
-	// 	body: Vec::new()
-	// };
+	/* For the first pass, store a vector of calls for later use. */
+	// let mut calls: Vec<Call> = Vec::new();
 
 	let mut fp_iter = tokens.iter().peekable();
+
+
+	let mut done_params: bool = true;
+
 	while let Some(&raw) = fp_iter.peek() {
 		match raw {
 			Token::Keyword(ref lvalue) => {
+				fp_iter.next();
+
+
+				if lvalue == "begin" {
+					println!("BEGIN");
+					done_params = false;
+					
+				}
+
+				
+				if lvalue == "lvalue" {
+					
+					if let Token::Assignment(ref passed) = fp_iter.peek().unwrap() {
+						fp_iter.next();
+						
+						if let Token::Keyword(ref rvalue) = fp_iter.peek().unwrap() {
+							fp_iter.next();
+							
+							if rvalue == "rvalue" {
+
+								/* parameter we want */
+								if !done_params {
+									if let Token::Assignment(ref rpassed) = fp_iter.peek().unwrap() {
+										println!("LVALUE: {}", lvalue);
+										println!("PASSED: {}", passed);
+										println!("RVALUE: {}", rvalue);
+										println!("PASSED: {}", rpassed);
+										fp_iter.next();
+										fp_iter.next();
+										
+											println!("Loaded Param into Call: {}", passed);
+											call.passed_params.push(passed.clone());
+
+											println!("Loaded Local Var into Call: {}", passed);
+											println!("Loaded Local Var into Call: {}", rpassed);
+											call.local_vars.insert(passed.clone(), rpassed.clone());
+
+										
+									}
+								}
+							}
+						}
+					}
+				}
+				
+
+				
+
+				
+				if lvalue == "call" {
+					done_params = true;
+					if let Token::FunctionCallWithParams(ref fname) = fp_iter.peek().unwrap() {
+						fp_iter.next();
+						println!("Loaded Name into Call: {}", fname);
+						call.name = fname.clone();
+					}
+				} 
 
 			}
 			_ => {fp_iter.next(); }
@@ -183,7 +235,17 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 
 
 				if c == "halt" {
-					output_lines.push("\treturn;\n}\n;".to_string());
+					output_lines.push("\treturn;\n}\n".to_string());
+				}
+				if c == "return" {
+					output_lines.push("\treturn;\n}\n".to_string());
+				}
+				if c == "goto" {
+					if let Token::Constant(ref constant) = iterable.peek().unwrap() {
+						iterable.next();
+
+						output_lines.push(format!("\tc{}();\n", constant))
+					}
 				}
 				if c == "call" {
 					if let Token::FunctionCallWithParams(ref name) = iterable.peek().unwrap() {
@@ -198,12 +260,11 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 						fcall.push_str("(");
 						
 						for (key, value) in call.params.iter() {
-
 							let parameter = *variables.get(value).unwrap();
 							if index == call.params.keys().len() - 1 {
-								fcall.push_str(&format!("{}", parameter));
+								fcall.push_str(&format!("&{}", value));
 							} else {
-								fcall.push_str(&format!("{}", parameter));
+								fcall.push_str(&format!("&{}", value));
 								fcall.push_str(",");
 							}
 							index += 1;
@@ -221,27 +282,26 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 
 				if c == "begin" {
 					/* Start collecting parameters */
-					println!("Matched begin.");
 					let mut to_coll_function_tokens: bool = true;
 
 					while to_coll_function_tokens == true {
 						if let Token::Keyword(left_lval) = iterable.peek().unwrap() {
-							println!("Got keywd: {}", left_lval);
+							
 							iterable.next();
 
 							if left_lval == "lvalue" { 
 								// iterable.next();
 
 								if let Token::Assignment(lvalue) = iterable.peek().unwrap() {
-									println!("Got lvalue: {}", lvalue);
+									
 									iterable.next();
 
 									if let Token::Keyword(right_rval) = iterable.peek().unwrap() {
-										println!("Got keywd: {}", right_rval);
+										
 										iterable.next();
 
 										if let Token::Assignment(rvalue) = iterable.peek().unwrap() {
-											println!("Got rvalue: {}", rvalue);
+											
 											iterable.next();
 											iterable.next(); /* handle the := */
 
@@ -258,21 +318,6 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 				}
 
 				if c == "label" { /* Function Call Code */
-
-					/* Need to "register" a label and then "call" it later from
-					 * a function descriptor table.
-					 */
-
-					/* Calls proceed as follows:
-					 * begin
-					 * --- some loading of variables (inputs) ---
-					 * call <functionName(var1, var2);>
-					 * --- load old variables with var1, var2, etc ---
-					 * end
-					 */
-					let collect_function_body: bool = true;
-					let collect_function_arguments: bool = true;
-
 					/* Functions can have either constant names or string names */
 					if let Token::Constant(ref val) = iterable.peek().unwrap() {
 						iterable.next();
@@ -286,33 +331,19 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 						println!("Call Name: {}", call.name);
 						if *fname == *call.name {
 							output_lines.push(format!("\nvoid {}(", fname));
-
-							let mut i = 0;
-							for (key, value) in call.params.iter() {
-								if i == call.params.keys().len() - 1 {
-									output_lines.push(format!("&{}", value));
+							for (i, value) in call.passed_params.iter().enumerate() {
+								if i == call.passed_params.len() - 1 {
+									output_lines.push(format!("uint64_t* {}", value));
 								} else {
-									output_lines.push(format!("&{},", value));
+									output_lines.push(format!("uint64_t* {}, ", value));
 								}
 							}
-
 							output_lines.push(") ".to_string());
-
-							output_lines.push("{{\n".to_string());
+							output_lines.push("{\n".to_string());
 						} else {
 							output_lines.push(format!("\nvoid {}() {{\n", fname));
 						}
-
-						
-
-						if collect_function_body {
-
-						}
 					}
-
-
-
-
 				}
 
 				if c == "lvalue" {
@@ -329,7 +360,7 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 								if let Token::Constant(int) = iterable.peek().unwrap() {
 									iterable.next();
 									iterable.next(); /* skip := */
-									output_lines.push(format!("\tuint64_t {} = {};\n", lassign, int));
+									
 									println!("\nuint64_t {} = {};\n", lassign, int);
 									variables.insert(lassign.clone(), *int);
 								}
@@ -337,6 +368,7 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 
 							if let Token::Assignment(ref lvalue) = iterable.peek().unwrap() {
 								println!("Got lvalue: {}", lvalue);
+
 								iterable.next();
 								if let Token::Keyword(ref keywd) = iterable.peek().unwrap() {
 									println!("Got keywd: {}", keywd);
@@ -346,9 +378,41 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 										if let Token::Constant(ref constant) = iterable.peek().unwrap() {
 											println!("Got constant: {}", constant);
 											iterable.next();
+
+											println!("LEFT ASSIGN: {}", lassign);
+											println!("LEFT VALUE: {}", lvalue);
+											if lvalue == lassign {
+												println!("VALUES MATCHED");
+
+
+												for (key, var) in call.local_vars.clone() {
+													if var == lvalue.clone() {
+
+													}
+												}
+
+												if call.local_vars.contains_key(lvalue) {
+													println!("CALL LOCAL VARS CONTAINED: {}", lvalue);
+													/* TODO: recognize operator for this */
+													output_lines.push(
+														format!(
+															"\t*{} = *{} + {};\n",
+															lvalue,
+															lvalue,
+															constant
+														)
+													);
+												}
+
+												
+											}
+
+
 											if let Token::Assignment(ref assign) = iterable.peek().unwrap() {
 												println!("Got assign: {}", assign);
 												iterable.next();
+
+												
 												
 
 											}
@@ -356,11 +420,24 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 									}
 									if keywd == "rvalue" {
 										if let Token::Assignment(ref assign) = iterable.peek().unwrap() {
-											println!("Got assign: {}", assign);
+											println!("Got RIGHT assign: {}", assign);
 											iterable.next();
-											if let Token::Assignment(ref assign) = iterable.peek().unwrap() {
-												println!("Got assign: {}", assign);
+											if let Token::Assignment(ref rassign) = iterable.peek().unwrap() {
+												println!("Got assign: {}", rassign);
 												iterable.next();
+
+												if call.local_vars.contains_key(lvalue) {
+													println!("CALL LOCAL VARS CONTAINED: {}", lvalue);
+													/* TODO: recognize operator for this */
+													output_lines.push(
+														format!(
+															"\t*{} = *{} + *{};\n",
+															lvalue,
+															lvalue,
+															assign
+														)
+													);
+												}
 												
 											}
 										}
@@ -374,12 +451,17 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 
 
 				if c == "rvalue" {
-					iterable.next();
-					if let Token::Keyword(ref a) = iterable.peek().unwrap() {
-						if a == "print" {
-							iterable.next();
+					if let Token::Assignment(ref val) = iterable.peek().unwrap() {
+						iterable.next();
+						if let Token::Keyword(ref a) = iterable.peek().unwrap() {
+							if a == "print" {
+								iterable.next();
 
-							println!("Printable rvalue...");
+								println!("Printable rvalue...");
+
+								println!("\tcout << {} << endl;\n", variables.get(val).unwrap());
+								output_lines.push(format!("\tcout << {} << endl;\n", val ));
+							}
 						}
 					}
 				}
@@ -489,12 +571,13 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> Vec<String> {
 		}
 	}
 
-	return output_lines
+	return (output_lines, variables)
 }
 
 
 fn write_to_output(
-	output_lines: Vec<String>, /* Main function code */
+	output_lines: Vec<String>,
+	variables: HashMap<String, i64> /* Main function code */
 	// function_declarations: Vec<Call>
 ) {
 	let path = Path::new("src/out.cpp");
@@ -510,20 +593,44 @@ fn write_to_output(
 
 	let boilerplate = "#include <iostream>
 #include <stdint.h>
-#include <cstdio.h>
-
+#include <stdio.h>
+using namespace std;
+";
+	let main = "
 int main(int argc, char* argv[]) {
 ";
 
+
+	let mut top_level_vars = String::new();
+	for var in variables.keys() {
+		top_level_vars.push_str(&format!("uint64_t {} = {};\n", var, variables.get(var).unwrap()));
+	}
+
+	
+	
+	/* Write to file: #include statements */
 	match file.write_all(boilerplate.as_bytes()) {
-			Err(why) => {
-				panic!("Couldnt write to: {}: {}", display, why.description());
-			},
-			Ok(_) => println!("Successfully wrote output file: {:?}", "Boilerplate")
-		}
+		Err(why) => {
+			panic!("Couldnt write to: {}: {}", display, why.description());
+		},
+		Ok(_) => println!("Successfully wrote output file: {:?}", "Boilerplate")
+	}
 
+	/* Write to file: Top Level Variables */
+	match file.write_all(top_level_vars.as_bytes()) {
+		Err(why) => {
+			panic!("Couldnt write to: {}: {}", display, why.description());
+		},
+		Ok(_) => println!("Successfully wrote output file: {:?}", "Top Level Variables")
+	}
 
-
+	/* Write to file: Main Declaration */
+	match file.write_all(main.as_bytes()) {
+		Err(why) => {
+			panic!("Couldnt write to: {}: {}", display, why.description());
+		},
+		Ok(_) => println!("Successfully wrote output file: {:?}", "Main Declaration")
+	}
 
 	for output in output_lines {
 		match file.write_all(output.as_bytes()) {
@@ -563,8 +670,12 @@ fn main() {
 
     println!("\n\n");
     
+    let filtered = filter_to_cpp(result.clone());
+    /* Tuple Access Syntax, very nice */
+    let output_lines = filtered.0;
+    let variables = filtered.1;
 
-    write_to_output(filter_to_cpp(result.clone()));
+    write_to_output(output_lines, variables);
 
    
 }
