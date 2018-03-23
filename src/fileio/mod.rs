@@ -24,7 +24,9 @@ impl FileIO {
 		match file.read_to_string(&mut s)
 		{
 			Err(why) => panic!("Couldn't read {}: {}", display, why.description()),
-			Ok(_) => print!("{} contains:\n{}", display, s),
+			Ok(_) => {
+				// print!("{} contains:\n{}", display, s)
+			}
 		}
 
 		s

@@ -102,6 +102,7 @@ struct Call {
 	passed_params: Vec<String>,
 	params: HashMap<String, String>,
 	local_vars: HashMap<String, String>,
+	operation_on_variable: HashMap<String, (String, i64)>, /* Defines an operation on the passed variable */
 	body: Vec<String>
 }
 
@@ -115,7 +116,7 @@ struct Function {
 
 /* We want to return an array of c++ lines to write to file */
 /* TODO: Build a method to write to file a Vec<String> */
-fn filter_to_cpp(raw_tokens: Vec<Token>) -> (Vec<String>, HashMap<String, i64>) {
+fn filter_to_cpp(raw_tokens: Vec<Token>) -> (Vec<String>, HashMap<String, i64>, Call) {
 
 	let mut output_lines: Vec<String> = Vec::new();
 
@@ -127,318 +128,596 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> (Vec<String>, HashMap<String, i64>) 
 	let mut variables: HashMap<String, i64> = HashMap::new();
 	/* To update values in this use: *my_map.get_mut("a").unwrap() += 10; */
 
+
+	/* Store all calls in here */
+	let mut calls: Vec<Call> = Vec::new();
+
 	let mut call = Call { 
 		name: String::new(),
 		passed_params: Vec::new(),
 		params: HashMap::new(),
 		local_vars: HashMap::new(),
+		operation_on_variable: HashMap::new(),
 		body: Vec::new()
 	};
 
-	/* For the first pass, store a vector of calls for later use. */
-	// let mut calls: Vec<Call> = Vec::new();
-
 	let mut fp_iter = tokens.iter().peekable();
-
-
 	let mut done_params: bool = true;
+	let mut to_replace_inner_with_goto: bool = false;
 
 	while let Some(&raw) = fp_iter.peek() {
 		match raw {
 			Token::Keyword(ref lvalue) => {
 				fp_iter.next();
-
-
+				/* These 3 if statements collect a function call with parameters */
 				if lvalue == "begin" {
-					println!("BEGIN");
 					done_params = false;
-					
 				}
-
-				
 				if lvalue == "lvalue" {
-					
-					if let Token::Assignment(ref passed) = fp_iter.peek().unwrap() {
+					if let Some(Token::Assignment(ref passed)) = fp_iter.peek() {
 						fp_iter.next();
-						
-						if let Token::Keyword(ref rvalue) = fp_iter.peek().unwrap() {
+						if let Some(Token::Keyword(ref rvalue)) = fp_iter.peek() {
 							fp_iter.next();
-							
 							if rvalue == "rvalue" {
-
-								/* parameter we want */
 								if !done_params {
-									if let Token::Assignment(ref rpassed) = fp_iter.peek().unwrap() {
-										println!("LVALUE: {}", lvalue);
-										println!("PASSED: {}", passed);
-										println!("RVALUE: {}", rvalue);
-										println!("PASSED: {}", rpassed);
+									if let Some(Token::Assignment(ref rpassed)) = fp_iter.peek() {
 										fp_iter.next();
 										fp_iter.next();
-										
-											println!("Loaded Param into Call: {}", passed);
-											call.passed_params.push(passed.clone());
-
-											println!("Loaded Local Var into Call: {}", passed);
-											println!("Loaded Local Var into Call: {}", rpassed);
-											call.local_vars.insert(passed.clone(), rpassed.clone());
-
-										
+										call.passed_params.push(passed.clone());
+										call.local_vars.insert(passed.clone(), rpassed.clone());
 									}
 								}
 							}
 						}
 					}
 				}
-				
-
-				
-
-				
 				if lvalue == "call" {
 					done_params = true;
-					if let Token::FunctionCallWithParams(ref fname) = fp_iter.peek().unwrap() {
+					if let Some(Token::FunctionCallWithParams(ref fname)) = fp_iter.peek() {
 						fp_iter.next();
-						println!("Loaded Name into Call: {}", fname);
 						call.name = fname.clone();
 					}
-				} 
+				}
+			}
+			Token::FunctionName(ref c) => {
+				fp_iter.next();
+			}
+			Token::FunctionCallWithParams(ref function_name) => {
 
+				/* If we didnt consume this earlier, the call is a function without params */
+				calls.push(Call { 
+					name: function_name.clone(),
+					passed_params: Vec::new(),
+					params: HashMap::new(),
+					local_vars: HashMap::new(),
+					operation_on_variable: HashMap::new(),
+					body: Vec::new()
+				});
+
+				fp_iter.next();
 			}
 			_ => {fp_iter.next(); }
 		}
 	}
-
-
 	/* Second Pass, loop through non-function tokens created by earlier pass */
 	let mut iterable = tokens.iter().peekable();
 	while let Some(&raw) = iterable.peek() {
 		match raw {
 			Token::Printable(ref c) => {
-
 				/* Printable is defined in Token as Printable(String),
 				 * so we reference the string as "ref c"
 				 */
-
-				println!("Matched Printable, raw val: {:?}", c);
-
-				println!("Equivalent Statement in c++: ");
-				println!("\ncout << {:?} << endl;\n", c);
 				output_lines.push(format!("\tcout << {:?} << endl;\n", c));
 				iterable.next();
 			}
-			Token::Keyword(ref c) => {
-				println!("Matched Keyword, raw val: {:?}", c);
-
-				/* Consume */
+			Token::Keyword(ref first_key_in_pattern) => {
 				iterable.next();
-
-
-				if c == "halt" {
-					output_lines.push("\treturn;\n}\n".to_string());
-				}
-				if c == "return" {
-					output_lines.push("\treturn;\n}\n".to_string());
-				}
-				if c == "goto" {
-					if let Token::Constant(ref constant) = iterable.peek().unwrap() {
+				if first_key_in_pattern == "push" {
+					if let Some(Token::Constant(constant)) = iterable.peek() {
 						iterable.next();
+						if let Some(Token::Keyword(show)) = iterable.peek() {
+							iterable.next();
+							if show == "show" {
+								/* push -> constant -> show -> ! */
+								if let Some(Token::Printable(printable)) = iterable.peek() {
+									iterable.next();
+									/* Handle the printable token */
+									output_lines.push(format!("\tcout << {:?} << endl;\n", printable));
+									if let Some(Token::Not) = iterable.peek() {
+										iterable.next();
+										output_lines.push(format!("\tcout << \" \" << !{} << endl;\n", constant))
+									}
+								}
+							}
+							if show == "push" {
+								/* push -> constant -> push -> constant */
+								if let Some(Token::Constant(sub_const)) = iterable.peek() {
+									iterable.next();
+									if let Some(Token::Keyword(shown)) = iterable.peek() {
+										iterable.next();
+										if shown == "show" {
+											if let Some(Token::Printable(printable)) = iterable.peek() {
+												iterable.next();
+												/* Handle the printable token */
+												output_lines.push(format!("\tcout << {:?} << endl;\n", printable));
 
-						output_lines.push(format!("\tc{}();\n", constant))
+												let mut operator;
+												match iterable.peek() {
+													Some(Token::Plus) => {
+														operator = '+';
+														output_lines.push(
+															format!(
+																"\tcout << {} {} {} << endl;\n", 
+																constant,
+																operator, 
+																sub_const
+															)
+														);
+														iterable.next();
+													}
+													Some(Token::Minus) => {
+														operator = '-';
+														output_lines.push(
+															format!(
+																"\tcout << {} {} {} << endl;\n", 
+																constant,
+																operator, 
+																sub_const
+															)
+														);
+														iterable.next();
+													}
+													Some(Token::IntDiv) => {
+														operator = '/';
+														output_lines.push(
+															format!(
+																"\tcout << {} {} {} << endl;\n", 
+																constant,
+																operator, 
+																sub_const
+															)
+														);
+														iterable.next();
+													}
+													Some(Token::Multiply) => {
+														operator = '*';
+														output_lines.push(
+															format!(
+																"\tcout << {} {} {} << endl;\n", 
+																constant,
+																operator, 
+																sub_const
+															)
+														);
+														iterable.next();
+													}
+													Some(Token::Or) => {
+														operator = '|';
+														output_lines.push(
+															format!(
+																"\tcout << ({} {} {}) << endl;\n", 
+																constant,
+																operator, 
+																sub_const
+															)
+														);
+														iterable.next();
+													}
+													Some(Token::And) => {
+														operator = '&';
+														output_lines.push(
+															format!(
+																"\tcout << ({} {} {}) << endl;\n", 
+																constant,
+																operator, 
+																sub_const
+															)
+														);
+														iterable.next();
+													}
+													Some(Token::RemainDiv(ref a)) => {
+														operator = '%';
+														output_lines.push(
+															format!(
+																"\tcout << {} {} {} << endl;\n", 
+																constant,
+																operator, 
+																sub_const
+															)
+														);
+														iterable.next();
+													}
+
+													Some(Token::Keyword(ref div)) => {
+														if div == "div" {
+															operator = '%';
+															output_lines.push(
+																format!(
+																	"\tcout << {} {} {} << endl;\n", 
+																	constant,
+																	operator, 
+																	sub_const
+																)
+															);
+															iterable.next();
+														} else {
+															output_lines.push(
+																format!("\tcout << {} - {} << endl;\n", 
+																	constant,
+																	sub_const
+																)
+															);
+														}
+													}
+
+													Some(Token::LessThan) => {
+														iterable.next();
+														match iterable.peek() {
+															Some(Token::GreaterThan) => {
+																iterable.next();
+																output_lines.push(
+																	format!("\tcout << (int)({} != {}) << endl;\n", 
+																		constant,
+																		sub_const
+																	)
+																);
+															}
+															Some(Token::Equal) => {
+																iterable.next();
+																output_lines.push(
+																	format!("\tcout << (int)({} <= {}) << endl;\n", 
+																		constant,
+																		sub_const
+																	)
+																);
+															}
+
+															_ => {
+																iterable.next();
+																output_lines.push(
+																	format!("\tcout << (int)({} < {}) << endl;\n", 
+																		constant,
+																		sub_const
+																	)
+																);
+															}
+														}
+													}
+
+													Some(Token::GreaterThan) => {
+														iterable.next();
+														match iterable.peek() {
+															Some(Token::Equal) => {
+																iterable.next();
+																output_lines.push(
+																	format!("\tcout << (int)({} >= {}) << endl;\n", 
+																		constant,
+																		sub_const
+																	)
+																);
+															}
+
+															_ => {
+																iterable.next();
+																output_lines.push(
+																	format!("\tcout << (int)({} > {}) << endl;\n", 
+																		constant,
+																		sub_const
+																	)
+																);
+															}
+														}
+													}
+
+													None => {
+														output_lines.push(
+															format!("\tcout << {} - {} << endl;\n", 
+																constant,
+																sub_const
+															)
+														);
+													}
+													_ => {
+														output_lines.push(
+															format!("\tcout << {} - {} << endl;\n", 
+																constant,
+																sub_const
+															)
+														);
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
 					}
 				}
-				if c == "call" {
-					if let Token::FunctionCallWithParams(ref name) = iterable.peek().unwrap() {
+				if first_key_in_pattern == "halt" {
+					to_replace_inner_with_goto = false;
+					output_lines.push("\n}\n".to_string());
+				}
+				if first_key_in_pattern == "return" {
+					to_replace_inner_with_goto = false;
+					output_lines.push("\treturn;\n}\n".to_string());
+				}
+				if first_key_in_pattern == "goto" {
+					if let Some(Token::Constant(ref constant)) = iterable.peek(){
+						iterable.next();
+						output_lines.push(format!("\tc{}();\n}}\n", constant))
+					}
+				}
+				if first_key_in_pattern == "call" {
+					to_replace_inner_with_goto = false;
+					if let Some(Token::FunctionCallWithParams(ref name)) = iterable.peek() {
 						// output_lines.push(format!("{:?}", ))
 
 						let mut fcall = String::new();
 						let mut index = 0;
+
 						fcall.push_str("\t");
 						fcall.push_str(name);
+
 						call.name = name.to_string();
-						println!("Assigned Name to Call: {}", name);
+
 						fcall.push_str("(");
-						
-						for (key, value) in call.params.iter() {
-							let parameter = *variables.get(value).unwrap();
-							if index == call.params.keys().len() - 1 {
-								fcall.push_str(&format!("&{}", value));
-							} else {
-								fcall.push_str(&format!("&{}", value));
-								fcall.push_str(",");
-							}
-							index += 1;
-							
+
+						let col_params: Vec<_> = call.params.iter().collect();
+						for (key, value) in col_params.iter() {
+							match variables.get(*value) {
+								Some(parameter) => {
+									if index == call.params.keys().len() - 1 {
+										fcall.push_str(&format!("&{}", value));
+									} else {
+										fcall.push_str(&format!("&{}", value));
+										fcall.push_str(",");
+									}
+									index += 1;
+								}
+								None => {
+								}
+							}						
 						}
 						fcall.push_str(");\n");
-
 						output_lines.push(fcall);
-
-						
 					}
 				}
-
-				
-
-				if c == "begin" {
+				if first_key_in_pattern == "begin" {
 					/* Start collecting parameters */
 					let mut to_coll_function_tokens: bool = true;
-
 					while to_coll_function_tokens == true {
-						if let Token::Keyword(left_lval) = iterable.peek().unwrap() {
-							
+						if let Some(Token::Keyword(left_lval)) = iterable.peek() {
 							iterable.next();
-
 							if left_lval == "lvalue" { 
-								// iterable.next();
-
-								if let Token::Assignment(lvalue) = iterable.peek().unwrap() {
-									
+								if let Some(Token::Assignment(lvalue)) = iterable.peek() {
 									iterable.next();
-
-									if let Token::Keyword(right_rval) = iterable.peek().unwrap() {
-										
+									if let Some(Token::Keyword(right_rval)) = iterable.peek() {
 										iterable.next();
+										if let Some(Token::Assignment(rvalue)) = iterable.peek() {
+											if let Some(Token::Keyword(pushed)) = iterable.peek() {
+												iterable.next();
+												if let Some(Token::Constant(constant)) = iterable.peek() {
+													iterable.next();
+													let mut operator;
+													match iterable.peek() {
+														Some(Token::Plus) => {
+															operator = '+';
+															call.params.insert(lvalue.to_string(), rvalue.to_string() );
+															call.operation_on_variable.insert(lvalue.to_string(), (operator.to_string(), *constant));
+															iterable.next();
+														}
+														Some(Token::Minus) => {
+															operator = '-';
+															call.params.insert(lvalue.to_string(), rvalue.to_string() );
+															call.operation_on_variable.insert(lvalue.to_string(), (operator.to_string(), *constant));
+															iterable.next();
+														}
+														Some(Token::IntDiv) => {
+															operator = '/';
+															call.params.insert(lvalue.to_string(), rvalue.to_string() );
+															call.operation_on_variable.insert(lvalue.to_string(), (operator.to_string(), *constant));
+															iterable.next();
+														}
+														Some(Token::Multiply) => {
+															operator = '*';
+															call.params.insert(lvalue.to_string(), rvalue.to_string() );
+															call.operation_on_variable.insert(lvalue.to_string(), (operator.to_string(), *constant));
+															iterable.next();
+														}
+														Some(Token::RemainDiv(ref a)) => {
+															operator = '%';
+															call.params.insert(lvalue.to_string(), rvalue.to_string() );
+															call.operation_on_variable.insert(lvalue.to_string(), (operator.to_string(), *constant));
+															iterable.next();
+														}
+														None => {
+															call.params.insert(lvalue.to_string(), rvalue.to_string());
+														}
+														_ => {}
+													}
+													iterable.next();
+													iterable.next(); /* handle the := */
+												}
+											} else {
+												iterable.next();
+												iterable.next(); /* handle the := */
 
-										if let Token::Assignment(rvalue) = iterable.peek().unwrap() {
-											
-											iterable.next();
-											iterable.next(); /* handle the := */
-
-											call.params.insert(lvalue.to_string(), rvalue.to_string());
-											
+												call.params.insert(lvalue.to_string(), rvalue.to_string());
+											}
 										}
 									}
 								}
 							} else {
 								to_coll_function_tokens = false;
 							}
-						}
-					}
-				}
-
-				if c == "label" { /* Function Call Code */
-					/* Functions can have either constant names or string names */
-					if let Token::Constant(ref val) = iterable.peek().unwrap() {
-						iterable.next();
-						output_lines.push(format!("\nvoid c{}() {{\n", val));
-					}
-
-					if let Token::FunctionName(ref fname) = iterable.peek().unwrap() {
-						iterable.next();
-
-						println!("Got FunctionName: {}", fname);
-						println!("Call Name: {}", call.name);
-						if *fname == *call.name {
-							output_lines.push(format!("\nvoid {}(", fname));
-							for (i, value) in call.passed_params.iter().enumerate() {
-								if i == call.passed_params.len() - 1 {
-									output_lines.push(format!("uint64_t* {}", value));
-								} else {
-									output_lines.push(format!("uint64_t* {}, ", value));
-								}
-							}
-							output_lines.push(") ".to_string());
-							output_lines.push("{\n".to_string());
 						} else {
-							output_lines.push(format!("\nvoid {}() {{\n", fname));
+							to_coll_function_tokens = false;
 						}
 					}
 				}
-
-				if c == "lvalue" {
-					println!("Got lvalue");
-					if let Token::Assignment(ref lassign) = iterable.peek().unwrap() {
-						println!("got assign: {}", lassign);
-						iterable.next();
-						if let Token::Keyword(ref rkeywd) = iterable.peek().unwrap() {
-							println!("Got rkeywd: {}", rkeywd);
+				if first_key_in_pattern == "label" { /* Function Call Code */
+					/* Functions can have either constant names or string names */
+					if let Some(Token::Constant(ref val)) = iterable.peek() {
+						if !to_replace_inner_with_goto {
+							to_replace_inner_with_goto = true;
 							iterable.next();
-
+							output_lines.push(format!("\nvoid c{}() {{\n", val));
+						} else {
+							iterable.next();
+							output_lines.push(format!("\ngoto c{}\n", val));	
+						}	
+					}
+					if let Some(Token::FunctionName(ref fname)) = iterable.peek() {
+						if !to_replace_inner_with_goto {
+							to_replace_inner_with_goto = true;
+							iterable.next();
+							if *fname == *call.name {
+								output_lines.push(format!("\nvoid {}(", fname));
+								let col_params: Vec<_> = call.passed_params.iter().collect();
+								for (i, value) in col_params.iter().enumerate() {
+									if i == call.passed_params.len() - 1 {
+										output_lines.push(format!("uint64_t* {}", value));
+									} else {
+										output_lines.push(format!("uint64_t* {}, ", value));
+									}
+								}
+								output_lines.push(") ".to_string());
+								output_lines.push("{\n".to_string());
+							} else {
+								output_lines.push(format!("\nvoid {}() {{\n", fname));
+							}
+						} else {
+							iterable.next();
+							output_lines.push(format!("\n{}:\n", fname));
+						}
+					}
+				}
+				if first_key_in_pattern == "lvalue" {
+					if let Some(Token::Assignment(ref lassign)) = iterable.peek() {
+						iterable.next();
+						if let Some(Token::Keyword(ref rkeywd)) = iterable.peek() {
+							iterable.next();
 							if rkeywd == "push" {
-								// iterable.next();
-								if let Token::Constant(int) = iterable.peek().unwrap() {
+								if let Some(Token::Constant(int)) = iterable.peek() {
 									iterable.next();
 									iterable.next(); /* skip := */
-									
-									println!("\nuint64_t {} = {};\n", lassign, int);
 									variables.insert(lassign.clone(), *int);
 								}
 							}
-
-							if let Token::Assignment(ref lvalue) = iterable.peek().unwrap() {
-								println!("Got lvalue: {}", lvalue);
-
+							if let Some(Token::Assignment(ref lvalue)) = iterable.peek() {
 								iterable.next();
-								if let Token::Keyword(ref keywd) = iterable.peek().unwrap() {
-									println!("Got keywd: {}", keywd);
+								if let Some(Token::Keyword(ref keywd)) = iterable.peek() {
 									iterable.next();
-
 									if keywd == "push" {
-										if let Token::Constant(ref constant) = iterable.peek().unwrap() {
-											println!("Got constant: {}", constant);
+										if let Some(Token::Constant(ref constant)) = iterable.peek() {
 											iterable.next();
-
-											println!("LEFT ASSIGN: {}", lassign);
-											println!("LEFT VALUE: {}", lvalue);
 											if lvalue == lassign {
-												println!("VALUES MATCHED");
-
-
-												for (key, var) in call.local_vars.clone() {
-													if var == lvalue.clone() {
-
+												let mut operator = '-';
+												match iterable.peek() {
+													Some(Token::Plus) => {
+														operator = '+';
+														iterable.next();
 													}
+													Some(Token::Minus) => {
+														operator = '-';
+														iterable.next();
+													}
+													Some(Token::IntDiv) => {
+														operator = '/';
+														iterable.next();
+													}
+													Some(Token::Multiply) => {
+														operator = '*';
+														iterable.next();
+													}
+													Some(Token::RemainDiv(ref a)) => {
+														operator = '%';
+														iterable.next();
+													}
+													None => {}
+													_ => {}
 												}
 
 												if call.local_vars.contains_key(lvalue) {
-													println!("CALL LOCAL VARS CONTAINED: {}", lvalue);
-													/* TODO: recognize operator for this */
 													output_lines.push(
 														format!(
-															"\t*{} = *{} + {};\n",
+															"\t*{} = *{} {} {};\n",
 															lvalue,
 															lvalue,
+															operator,
 															constant
 														)
 													);
-												}
-
-												
-											}
-
-
-											if let Token::Assignment(ref assign) = iterable.peek().unwrap() {
-												println!("Got assign: {}", assign);
-												iterable.next();
-
-												
-												
-
+												}	
 											}
 										}
 									}
 									if keywd == "rvalue" {
-										if let Token::Assignment(ref assign) = iterable.peek().unwrap() {
-											println!("Got RIGHT assign: {}", assign);
+										if let Some(Token::Assignment(ref assign)) = iterable.peek() {
 											iterable.next();
-											if let Token::Assignment(ref rassign) = iterable.peek().unwrap() {
-												println!("Got assign: {}", rassign);
+											let mut operator = '_';
+											match iterable.peek() {
+												Some(Token::Plus) => {
+													operator = '+';
+													iterable.next();
+												}
+												Some(Token::Minus) => {
+													operator = '-';
+													iterable.next();
+												}
+												Some(Token::IntDiv) => {
+													operator = '/';
+													iterable.next();
+												}
+												Some(Token::Multiply) => {
+													operator = '*';
+													iterable.next();
+												}
+												Some(Token::RemainDiv(ref a)) => {
+													operator = '%';
+													iterable.next();
+												}
+												None => {}
+												_ => {}
+											}
+											if let Some(Token::Assignment(ref rassign)) = iterable.peek() {
 												iterable.next();
-
 												if call.local_vars.contains_key(lvalue) {
-													println!("CALL LOCAL VARS CONTAINED: {}", lvalue);
-													/* TODO: recognize operator for this */
+													match iterable.peek() {
+														Some(Token::Plus) => {
+															operator = '+';
+															iterable.next();
+														}
+														Some(Token::Minus) => {
+															operator = '-';
+															iterable.next();
+														}
+														Some(Token::IntDiv) => {
+															operator = '/';
+															iterable.next();
+														}
+														Some(Token::Multiply) => {
+															operator = '*';
+															iterable.next();
+														}
+														Some(Token::RemainDiv(ref a)) => {
+															operator = '%';
+															iterable.next();
+														}
+														None => {}
+														_ => {}
+													}
 													output_lines.push(
 														format!(
-															"\t*{} = *{} + *{};\n",
+															"\t*{} = *{} {} *{};\n",
 															lvalue,
 															lvalue,
+															operator,
 															assign
 														)
 													);
 												}
-												
 											}
 										}
 									}
@@ -447,87 +726,75 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> (Vec<String>, HashMap<String, i64>) 
 						}
 					}
 				}
-
-
-
-				if c == "rvalue" {
-					if let Token::Assignment(ref val) = iterable.peek().unwrap() {
+				if first_key_in_pattern == "rvalue" {
+					if let Some(Token::Assignment(ref val)) = iterable.peek() {
 						iterable.next();
-						if let Token::Keyword(ref a) = iterable.peek().unwrap() {
+						if let Some(Token::Keyword(ref pushed)) = iterable.peek() {
+							if pushed == "push" {
+								iterable.next();
+								if let Some(Token::Constant(ref constant)) = iterable.peek() {
+									iterable.next();
+									if let Some(Token::GreaterThan) = iterable.peek() {
+										iterable.next();
+										if let Some(Token::Keyword(ref gofalse)) = iterable.peek() {
+											iterable.next();
+											if let Some(Token::GotoLabel(ref label)) = iterable.peek() {
+												output_lines.push(format!("\tif (*{} < {}) {{\n", val, constant));
+												output_lines.push(format!("\t\tgoto {};\n", label));
+												output_lines.push("\t}\n".to_string());
+											}
+										}
+									}
+								}
+							}
+						}
+						if let Some(Token::Keyword(ref a)) = iterable.peek() {
 							if a == "print" {
 								iterable.next();
-
-								println!("Printable rvalue...");
-
-								println!("\tcout << {} << endl;\n", variables.get(val).unwrap());
-								output_lines.push(format!("\tcout << {} << endl;\n", val ));
+								match variables.get(val) {
+									Some(variable) => {
+										output_lines.push(format!("\tcout << {} << endl;\n", val));
+									}
+									None => {
+										match call.params.get(val) {
+											Some(variable) => {
+												output_lines.push(format!("\tcout << {} << endl;\n", variable));
+											}
+											None => {}
+										}
+									}
+								}
 							}
 						}
 					}
 				}
-
-				// if let Token::Assignment(variable) = iterable.peek().unwrap() {
-				// 	println!("Matched Assignment, raw val: {:?}", variable);
-				// 	iterable.next();
-
-				// 	if let Token::Keyword(keywd) = iterable.peek().unwrap() {
-				// 		if keywd == "push" {
-				// 			iterable.next();
-				// 			if let Token::Constant(int) = iterable.peek().unwrap() {
-				// 				iterable.next();
-				// 				println!("\nuint64_t {} = {};\n", variable, int);
-				// 				variables.insert(variable.clone(), *int);
-				// 			}
-				// 		}
-				// 	}
-				// }
 			}
-
 			Token::FunctionCall(ref c) => {
-				println!("Matched FunctionCall, raw val: {:?}", c);
-
-				println!("\n{}();\n", c);
-
-				output_lines.push(format!("\t{}();\n", c));
-				output_lines.push("}\n".to_string());
-
-				iterable.next();
+				if to_replace_inner_with_goto {
+					output_lines.push(format!("\tgoto {};\n", c));
+					iterable.next();
+				} else {
+					output_lines.push(format!("\t{}();\n", c));
+					output_lines.push("}\n".to_string());
+					iterable.next();
+				}
 			} 
-
 			Token::FunctionName(ref c) => {
-				println!("Matched FunctionName, raw val: {:?}", c);
-
 				iterable.next();
 			}
-
 			Token::FunctionCallWithParams(ref c) => {
-				println!("Matched FunctionCallWithParams, raw val: {:?}", c);
-
 				iterable.next();
 			}
-
 			Token::Assigned(ref c) => {
-				println!("Matched Assigned, raw val: {:?}", c);
-
 				iterable.next();
 			}
 			Token::Whitespace(ref c) => {
-				println!("Matched Whitespace, raw val: {:?}", c);
-
 				iterable.next();
 			}
-			// Token::Assignment(ref c) => {
-			// 	println!("Matched Assignment, raw val: {:?}", c);
-
-			// 	iterable.next();
-			// }
 			Token::Constant(ref c) => {
-				println!("Matched Constant, raw val: {:?}", c);
-
 				iterable.next();
 			} 		
 			&Token::Equivalent => {
-
 				iterable.next();
 			}			
 			&Token::LessThanEqual => {
@@ -566,30 +833,25 @@ fn filter_to_cpp(raw_tokens: Vec<Token>) -> (Vec<String>, HashMap<String, i64>) 
 			RemainDiv => {
 				iterable.next();
 			}
-
 			_ => { unreachable!() }
 		}
 	}
 
-	return (output_lines, variables)
+	return (output_lines, variables, call)
 }
-
 
 fn write_to_output(
 	output_lines: Vec<String>,
-	variables: HashMap<String, i64> /* Main function code */
-	// function_declarations: Vec<Call>
+	variables: HashMap<String, i64>,
+	call: Call
 ) {
 	let path = Path::new("src/out.cpp");
 	let display = path.display();
-
-  	
 
 	let mut file = match File::create(&path) {
 		Err(why) => panic!("Couldnt create {}: {}", display, why.description()),
 		Ok(file) => file,
 	};
-
 
 	let boilerplate = "#include <iostream>
 #include <stdint.h>
@@ -600,20 +862,63 @@ using namespace std;
 int main(int argc, char* argv[]) {
 ";
 
+	let mut function_declarations: String = "\n".to_string();
 
-	let mut top_level_vars = String::new();
-	for var in variables.keys() {
+	for line in output_lines.clone() {
+		let mut b_line = line.clone();
+		let a:Option<&mut str> = b_line.get_mut(1..5); /* Grabs "void" */
+		let a = a.map(|a| {
+			&*a
+		});
+		match a {
+			Some("void") => {
+				let chars_to_trim: &[char] = &[' ', '(', ')', '{', '\n' ];
+				let mut trimmed: &str = line.trim_matches(chars_to_trim);
+				let str_trimmed: String = trimmed.replace("void ", "");
+
+				if str_trimmed == call.name {
+					/* Handle parameter passing call here */
+					let mut out_str: String = format!("void {} (", call.name);
+					for (index, key) in call.params.keys().enumerate() {
+						if index == call.params.len() - 1 {
+							out_str.push_str(&format!("uint64_t *{}", key).to_string());
+						} else {
+							out_str.push_str(&format!("uint64_t *{}, ", key).to_string());
+						}
+					}
+					out_str.push_str(");\n");
+					function_declarations.push_str(&out_str);
+				} else {
+					/* Put all other non-parameter passing calls here */
+					function_declarations.push_str(&format!("void {}();\n", str_trimmed));
+				}
+			}
+			_ => {}
+		}
+	}
+
+	let mut top_level_vars = "\n".to_string();
+
+	let col_params: Vec<_> = variables.keys().collect();
+
+	for var in col_params {
 		top_level_vars.push_str(&format!("uint64_t {} = {};\n", var, variables.get(var).unwrap()));
 	}
 
-	
-	
 	/* Write to file: #include statements */
 	match file.write_all(boilerplate.as_bytes()) {
 		Err(why) => {
 			panic!("Couldnt write to: {}: {}", display, why.description());
 		},
-		Ok(_) => println!("Successfully wrote output file: {:?}", "Boilerplate")
+		Ok(_) => println!("Successfully wrote to output file: {:?}", "Boilerplate")
+	}
+
+	/* Write to file: Function Declarations */
+	match file.write_all(function_declarations.as_bytes()) {
+		Err(why) => {
+			panic!("Couldnt write to: {}: {}", display, why.description());
+		},
+		Ok(_) => println!("Successfully wrote to output file: {:?}", "Function Declarations")
 	}
 
 	/* Write to file: Top Level Variables */
@@ -621,7 +926,7 @@ int main(int argc, char* argv[]) {
 		Err(why) => {
 			panic!("Couldnt write to: {}: {}", display, why.description());
 		},
-		Ok(_) => println!("Successfully wrote output file: {:?}", "Top Level Variables")
+		Ok(_) => println!("Successfully wrote to output file: {:?}", "Top Level Variables")
 	}
 
 	/* Write to file: Main Declaration */
@@ -629,7 +934,7 @@ int main(int argc, char* argv[]) {
 		Err(why) => {
 			panic!("Couldnt write to: {}: {}", display, why.description());
 		},
-		Ok(_) => println!("Successfully wrote output file: {:?}", "Main Declaration")
+		Ok(_) => println!("Successfully wrote to output file: {:?}", "Main Declaration")
 	}
 
 	for output in output_lines {
@@ -640,42 +945,26 @@ int main(int argc, char* argv[]) {
 			Ok(_) => {}
 		}
 	}
-
-
-	match file.write_all("}".as_bytes()) {
-			Err(why) => {
-				panic!("Couldnt write to: {}: {}", display, why.description());
-			},
-			Ok(_) => println!("Successfully wrote output file: {:?}", "Boilerplate")
-	}
-	
 }
 
 fn main() {
 
     let argv: Vec<String> = env::args().collect();
     if argv.len() != 2 {
-        println!("\n\nError, exiting...\nUsage: {:?} src/demo.jaz", argv[0]);
+        println!("\n\nError, exiting...\nUsage: {:?} src/factProc.jaz", argv[0]);
         process::exit(1);
     }
 
     let data: String = FileIO::read_in_file(&argv[1]);
-
     let result: Vec<Token> = Tokenizer::lex(&data).unwrap();
-
-    println!("\n\n");
-    for item in &result {
-    	println!("{:?}", item);
-    }
-
-    println!("\n\n");
     
     let filtered = filter_to_cpp(result.clone());
     /* Tuple Access Syntax, very nice */
     let output_lines = filtered.0;
     let variables = filtered.1;
+    let call = filtered.2;
 
-    write_to_output(output_lines, variables);
+    write_to_output(output_lines, variables, call);
 
    
 }
